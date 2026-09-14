@@ -35,8 +35,8 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 def call_gemini_api(prompt, mime_type=None, data_bytes=None):
-    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับคีย์ทุกประเภท (AIza... และ AQ...)"""
-    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับคีย์ทุกประเภท"""
+    models = ["gemini-1.5-flash", "gemini-2.0-flash"]
     
     parts = [{"text": prompt}]
     if data_bytes and mime_type:
@@ -338,7 +338,7 @@ Return ONLY raw JSON object. Do not wrap in markdown syntax."""
                         )
                         line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_text))
                         if sugar_val < 70 or sugar_val >= 180:
-                            notify_caregiver("พบค่าน้ำตาลผิดปกติ", f"• ค่าน้ำตาล: {sugar_val} mg/dL\n{analysis}", sender_name)
+                            notify_caregiver("พบค่าน้ำตาลผิดปกติ", f"• ค่าน้ำตาล: {sugar_val} mg/dL", sender_name)
                         return
     except Exception as e:
         print(f"Error processing image: {e}")
