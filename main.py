@@ -1,6 +1,4 @@
 import os
-import cv2
-import numpy as np
 import json
 import re
 import base64
@@ -15,7 +13,6 @@ from linebot.models import (
 app = Flask(__name__)
 
 # ==================== CONFIG CREDENTIALS ====================
-# ดึงค่าจาก Environment Variables บน Render (หากไม่มีจะใช้ค่าเริ่มต้น)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get(
     "LINE_CHANNEL_ACCESS_TOKEN", 
     "baSWvsupfACGN0GFkgOGgH0UIvLrQO51yZZCBDDTUWJi8Ng29Xaj1kF3DjiYm3LdOUxe7q8m+EvPfarjixeL6GBc41sAo4KzBtvMC+t2RPZXbuuzNfizb4pKSVOZDllHaOytzNlzFW4Jl4VlQOe69AdB04t89/1O/w1cDnyilFU="
@@ -38,7 +35,7 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 def call_gemini_api(prompt, mime_type=None, data_bytes=None):
-    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับทั้งคีย์ AIza และคีย์ AQ."""
+    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับคีย์ทุกประเภท (AIza... และ AQ...)"""
     models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
     
     parts = [{"text": prompt}]
@@ -53,7 +50,6 @@ def call_gemini_api(prompt, mime_type=None, data_bytes=None):
     payload = {"contents": [{"parts": parts}]}
 
     for model_name in models:
-        # ยิงคำสั่งตรงผ่าน REST API 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
         
