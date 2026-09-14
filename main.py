@@ -35,7 +35,7 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 def call_gemini_api(prompt, mime_type=None, data_bytes=None):
-    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับคีย์ทุกประเภท"""
+    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับรหัสคีย์ทุกรูปแบบ"""
     models = ["gemini-1.5-flash", "gemini-2.0-flash"]
     
     parts = [{"text": prompt}]
