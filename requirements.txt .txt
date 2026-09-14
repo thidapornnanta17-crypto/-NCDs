@@ -1,0 +1,7 @@
+flask
+line-bot-sdk
+requests
+opencv-python-headless
+numpy
+gunicorn
+google-generativeai
