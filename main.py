@@ -11,80 +11,62 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, ImageMessage, TextMessage, AudioMessage, TextSendMessage, FlexSendMessage
 )
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 app = Flask(__name__)
 
 # ==================== CONFIG CREDENTIALS ====================
-LINE_CHANNEL_ACCESS_TOKEN = "baSWvsupfACGN0GFkgOGgH0UIvLrQO51yZZCBDDTUWJi8Ng29Xaj1kF3DjiYm3LdOUxe7q8m+EvPfarjixeL6GBc41sAo4KzBtvMC+t2RPZXbuuzNfizb4pKSVOZDllHaOytzNlzFW4Jl4VlQOe69AdB04t89/1O/w1cDnyilFU="
-LINE_CHANNEL_SECRET = "490d4f5e36a60913923f3bd1c8768a15"
+# ดึงค่าจาก Environment Variables บน Render (หากไม่มีจะใช้ค่าเริ่มต้น)
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get(
+    "LINE_CHANNEL_ACCESS_TOKEN", 
+    "baSWvsupfACGN0GFkgOGgH0UIvLrQO51yZZCBDDTUWJi8Ng29Xaj1kF3DjiYm3LdOUxe7q8m+EvPfarjixeL6GBc41sAo4KzBtvMC+t2RPZXbuuzNfizb4pKSVOZDllHaOytzNlzFW4Jl4VlQOe69AdB04t89/1O/w1cDnyilFU="
+).strip()
 
-# ใส่ API Key รูปแบบใหม่ (AQ...) ที่ได้จาก Google AI Studio
-GEMINI_API_KEY = "AQ.Ab8RN6JzW1QMbkG1nO5tmBNDwLwPHfPhsM45bdJMHn-u2Tlycg"
+LINE_CHANNEL_SECRET = os.environ.get(
+    "LINE_CHANNEL_SECRET", 
+    "490d4f5e36a60913923f3bd1c8768a15"
+).strip()
 
-CAREGIVER_LINE_ID = "U30245f201766077aac8b18bd15db6377"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+
+CAREGIVER_LINE_ID = os.environ.get(
+    "CAREGIVER_LINE_ID", 
+    "U30245f201766077aac8b18bd15db6377"
+).strip()
 # ============================================================
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
-genai.configure(api_key=GEMINI_API_KEY)
-
-SAFETY_SETTINGS = [
-    {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
-    {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
-    {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
-    {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
-]
 
 def call_gemini_api(prompt, mime_type=None, data_bytes=None):
-    """ฟังก์ชันเรียก Gemini AI รองรับทั้ง SDK และ Direct REST API (การันตีรองรับ AQ. Key)"""
-    # 1. ลองผ่าน SDK
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        if data_bytes and mime_type:
-            contents = [prompt, {"mime_type": mime_type, "data": data_bytes}]
-        else:
-            contents = prompt
-        response = model.generate_content(contents, safety_settings=SAFETY_SETTINGS)
-        if response and hasattr(response, 'text') and response.text:
-            return response.text
-    except Exception as sdk_err:
-        print(f"[SDK Warning] {sdk_err} -> สลับไปใช้ Direct REST API...")
+    """ส่งคำสั่งตรงไปยัง Gemini REST API รองรับทั้งคีย์ AIza และคีย์ AQ."""
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    
+    parts = [{"text": prompt}]
+    if data_bytes and mime_type:
+        b64_data = base64.b64encode(data_bytes).decode('utf-8')
+        parts.append({
+            "inline_data": {
+                "mime_type": mime_type,
+                "data": b64_data
+            }
+        })
+    payload = {"contents": [{"parts": parts}]}
 
-    # 2. สำรองด้วย Direct REST API (แก้ปัญหา AQ Key กับ SDK)
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    for model_name in models:
+        # ยิงคำสั่งตรงผ่าน REST API 
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
-        parts = [{"text": prompt}]
         
-        if data_bytes and mime_type:
-            b64_data = base64.b64encode(data_bytes).decode('utf-8')
-            parts.append({
-                "inline_data": {
-                    "mime_type": mime_type,
-                    "data": b64_data
-                }
-            })
-            
-        payload = {"contents": [{"parts": parts}]}
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
-        
-        if res.status_code == 200:
-            res_json = res.json()
-            return res_json["candidates"][0]["content"]["parts"][0]["text"]
-        
-        # ลองส่งแบบ Bearer Auth Header อีกวิธี
-        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
-        url_raw = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-        res2 = requests.post(url_raw, headers=headers, json=payload, timeout=30)
-        if res2.status_code == 200:
-            res_json2 = res2.json()
-            return res_json2["candidates"][0]["content"]["parts"][0]["text"]
-
-        print(f"[REST Error] Code {res.status_code}: {res.text}")
-    except Exception as rest_err:
-        print(f"[REST Exception] {rest_err}")
+        try:
+            res = requests.post(url, headers=headers, json=payload, timeout=20)
+            if res.status_code == 200:
+                res_json = res.json()
+                text = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text")
+                if text:
+                    return text
+            print(f"[Gemini Error] Model: {model_name} | Code: {res.status_code} | Resp: {res.text}")
+        except Exception as e:
+            print(f"[Gemini Exception]: {e}")
 
     return None
 
@@ -220,6 +202,10 @@ def notify_caregiver(title, detail_text, sender_name=""):
     except Exception as e:
         print(f"Error pushing to caregiver: {e}")
 
+@app.route("/", methods=['GET'])
+def index():
+    return "LINE Health Monitor Bot is running!", 200
+
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature', '')
@@ -245,9 +231,8 @@ def handle_text(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
-    is_tagged = '@' in raw_user_text
+    is_tagged = ('@' in raw_user_text) or ('ยายชา' in raw_user_text) or ('ห่างภัยNCDs' in raw_user_text)
 
-    # ตอบคำถามสุขภาพเมื่อมีการแท็ก @
     if is_tagged:
         clean_question = re.sub(r'@[^\s]+\s*', '', raw_user_text).strip()
         clean_question = re.sub(r'^(ยายชา|ห่างภัยNCDs)\s*', '', clean_question).strip()
@@ -256,7 +241,7 @@ def handle_text(event):
 
         prompt = (
             f"คุณคือผู้ช่วย AI ด้านสุขภาพประจำครอบครัว ตอบคำถามด้านสุขภาพ คำแนะนำการดูแลตัวเอง โรค NCDs หรือเรื่องอาหาร "
-            f"ตอบอย่างกระชับ สุภาพ อ่านง่าย และห้ามใช้สัญลักษณ์ดอกจัน (*) ในการจัดข้อความเด็ดขาด "
+            f"ตอบอย่างกระชับ สุภาพ อ่านง่าย ภาษาไทย และห้ามใช้สัญลักษณ์ดอกจัน (*) ในการจัดข้อความเด็ดขาด "
             f"คำถามจากคุณ {sender_name}: '{clean_question}'"
         )
         
@@ -266,7 +251,7 @@ def handle_text(event):
             ai_answer = ai_raw_response.replace('*', '').strip()
             reply_text = f"💡 คำตอบสำหรับคุณ {sender_name}:\n\n{ai_answer}"
         else:
-            reply_text = f"ขออภัยครับคุณ {sender_name} ไม่สามารถประมวลผลคำถามนี้ได้ในขณะนี้"
+            reply_text = f"ขออภัยครับคุณ {sender_name} ไม่สามารถเชื่อมต่อระบบประมวลผล Gemini ได้ในขณะนี้ (โปรดตรวจสอบ API Key)"
 
         line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_text))
         return
@@ -425,4 +410,5 @@ If no numbers: {"error": true}"""
         line_bot_api.reply_message(reply_token, TextSendMessage(text="⚠️ เกิดข้อผิดพลาดในการประมวลผลเสียง"))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
