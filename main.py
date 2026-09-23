@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import requests
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -20,6 +21,12 @@ LINE_CHANNEL_SECRET = os.environ.get(
     "LINE_CHANNEL_SECRET", 
     "490d4f5e36a60913923f3bd1c8768a15"
 ).strip()
+
+# 📌 วาง Web App URL จาก Google Apps Script (สำหรับระบบหลังบ้านบันทึกข้อมูล)
+GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwQOToSsiM85k_PIcBoRwUUuZa7_U8y_7b2UKkgzABkXiYuNMI8tSAHg-K7d10pvQVO/exec"
+
+# 📌 ลิงก์ Google Sheets สำหรับผู้ใช้กดดู (สิทธิ์ Viewer)
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnfsesvCMsdA7KxvRbKSUpyls/edit?usp=sharing"
 # ============================================================
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
@@ -40,10 +47,59 @@ def get_sender_name(event):
     except Exception:
         return "สมาชิก"
 
+def save_to_google_sheet(sender, data_type, value, result_summary, group_id="ส่วนตัว"):
+    """ส่งข้อมูลไปบันทึกลง Sheet (สร้าง Tab ตาม group_id อัตโนมัติ)"""
+    try:
+        payload = {
+            "action": "log",
+            "sender": sender,
+            "type": data_type,
+            "value": value,
+            "result": result_summary,
+            "groupId": group_id
+        }
+        requests.post(GOOGLE_SHEET_URL, json=payload, timeout=5)
+    except Exception as e:
+        print(f"❌ บันทึก Google Sheet ไม่สำเร็จ: {e}")
+
+def get_health_summary(sender, group_id="ส่วนตัว", days=7):
+    """ดึงข้อมูลสรุปผลความดันเฉลี่ยย้อนหลัง ตามจำนวนวัน (7 วัน หรือ 30 วัน)"""
+    try:
+        url = f"{GOOGLE_SHEET_URL}?action=summary&sender={sender}&groupId={group_id}&days={days}"
+        response = requests.get(url, timeout=5)
+        res_data = response.json()
+        
+        if res_data.get("status") == "empty":
+            return f"📊 ไม่พบประวัติการวัดความดันของ คุณ{sender} ในช่วง {days} วันที่ผ่านมาค่ะ"
+            
+        if res_data.get("status") == "success":
+            avg_sys = res_data.get("avg_sys")
+            avg_dia = res_data.get("avg_dia")
+            count = res_data.get("count")
+            
+            if avg_sys < 120 and avg_dia < 80:
+                eval_text = "🟢 อยู่ในเกณฑ์ดีเยี่ยมครับ"
+            elif avg_sys <= 139 or avg_dia <= 89:
+                eval_text = "🟡 เริ่มค่อนข้างสูง ควรควบคุมโซเดียมและออกกำลังกายเพิ่มขึ้นครับ"
+            else:
+                eval_text = "🔴 สูงกว่าเกณฑ์มาตรฐาน แนะนำปรึกษาแพทย์ประจำตัวครับ"
+
+            period_label = "รายสัปดาห์ (7 วัน)" if days == 7 else "รายเดือน (30 วัน)"
+            
+            return (
+                f"📈 **สรุปผลความดันโลหิต{period_label}**\n"
+                f"👤 ผู้บันทึก: คุณ{sender}\n"
+                f"----------------------------------\n"
+                f"• บันทึกทั้งหมด: {count} ครั้ง\n"
+                f"• ค่าความดันเฉลี่ย: **{avg_sys}/{avg_dia} mmHg**\n"
+                f"• ประเมินภาพรวม: {eval_text}"
+            )
+    except Exception as e:
+        return "❌ ไม่สามารถดึงข้อมูลสรุปผลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
+
 # ==================== LOGIC คำสั่งที่ 1: วิเคราะห์ความดันโลหิต ====================
 
 def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
-    """วิเคราะห์ค่าความดันโลหิตพร้อมระบุชื่อผู้ส่ง"""
     if sys_val < 90:
         sys_res = (
             "🔴 ค่าความดันตัวบน (SYS): ต่ำกว่า 90 mmHg | ความดันตัวบนต่ำ\n"
@@ -84,7 +140,7 @@ def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
             "• 🏃‍♂️ กิจกรรมและการใช้ชีวิต: ออกกำลังกายเบาถึงปานกลาง เช่น เดินเร็ว 🚶‍♂️ เลี่ยงกีฬาที่หักโหมหรือแข่งขันตื่นเต้น งดชา กาแฟ ☕ เครื่องดื่มชูกำลัง และแอลกอฮอล์ 🍷\n"
             "• 🔍 การสังเกตอาการ: ปวดศีรษะบริเวณท้ายทอย มึนงง เหนื่อยง่ายกว่าปกติ ตาพร่ามัวเล็กน้อย 👀 หากมีอาการควรรีบวัดความดันและไปพบแพทย์ก่อนวันนัด 🏥"
         )
-    else: # sys_val >= 180
+    else:
         sys_res = (
             "🚨 ค่าความดันตัวบน (SYS): 180 mmHg ขึ้นไป | วิกฤต / อันตรายร้ายแรง (Hypertensive Crisis)\n"
             "• 💡 ความหมาย: ภาวะความดันโลหิตสูงวิกฤต เสี่ยงเส้นเลือดในสมองแตก หรืออวัยวะสำคัญถูกทำลายเฉียบพลัน ⚠️\n"
@@ -123,9 +179,9 @@ def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
             "• 💡 ความหมาย: แรงต้านทานในหลอดเลือดสูงชัดเจน หัวใจต้องทำงานหนักตลอดเวลาแม้ในขณะคลายตัว 🫀 เสี่ยงต่อภาวะกล้ามเนื้อหัวใจโต และไตเสื่อมเรื้อรัง 🩺\n"
             "• 💊 ข้อควรปฏิบัติเรื่องยา: ต้องพบแพทย์เพื่อรับยาลดความดันโลหิต 🚨 กฎเหล็ก: ทานยาให้ตรงเวลาสม่ำเสมอ ห้ามหยุดยาเองเด็ดขาด\n"
             "• 🏃‍♂️ กิจกรรมและการใช้ชีวิต: เน้นการออกกำลังกายที่ไม่หักโหม 🧘‍♂️ งดสูบบุหรี่ 🚭 ชา กาแฟ ☕ เครื่องดื่มชูกำลัง และแอลกอฮอล์ทุกชนิด 🍺 ฝึกผ่อนคลายกล้ามเนื้อและทำสมาธิ\n"
-            "• 🔍 การสังเกตอาการ: ปวดตึงบริเวณท้ายทอยหรือตึงคอบารมี 🤕 แน่นตึงหัวใจ เหนื่อยง่ายกว่าปกติเมื่อออกแรง 😮‍ศี"
+            "• 🔍 การสังเกตอาการ: ปวดตึงบริเวณท้ายทอยหรือตึงคอบารมี 🤕 แน่นตึงหัวใจ เหนื่อยง่ายกว่าปกติเมื่อออกแรง 😮‍💨"
         )
-    else: # dia_val >= 110
+    else:
         dia_res = (
             "🚨 ค่าความดันตัวล่าง (DIA): 110 mmHg ขึ้นไป | วิกฤต / อันตรายร้ายแรง (Hypertensive Crisis)\n"
             "• 💡 ความหมาย: ภาวะความดันตัวล่างสูงระดับวิกฤต เสี่ยงต่อการเกิดภาวะเส้นเลือดในสมองแตก 🧠 หัวใจวาย 💔 หรือไตวายเฉียบพลันได้ตลอดเวลา\n"
@@ -346,8 +402,40 @@ def handle_text(event):
     reply_token = event.reply_token
     raw_text = event.message.text.strip()
     
-    # 📌 ดึงชื่อ Display Name ของคนที่พิมพ์ในกลุ่มทันที
     sender_name = get_sender_name(event)
+    group_id = event.source.group_id if event.source.type == 'group' else "ส่วนตัว"
+
+    # 📌 คำสั่งขอดูลิงก์ประวัติย้อนหลังใน Google Sheets
+    if raw_text in ["ดูประวัติ", "ขอลิงก์", "ดูตาราง", "ดูแผ่นงาน"]:
+        if event.source.type == 'group':
+            msg = (
+                f"📊 **ลิงก์ตารางบันทึกสุขภาพของกลุ่มนี้**\n\n"
+                f"คุณ{sender_name} และครอบครัวสามารถเปิดดูประวัติย้อนหลังได้ที่นี่เลยค่ะ:\n"
+                f"🔗 {SPREADSHEET_URL}\n\n"
+                f"📌 *คำแนะนำ:* เมื่อเปิดลิงก์แล้ว ให้เลือกดู Tab ด้านล่างที่มีชื่อว่า:\n"
+                f"👉 **`{group_id}`**"
+            )
+        else:
+            msg = (
+                f"📊 **ลิงก์ตารางบันทึกสุขภาพส่วนตัว**\n\n"
+                f"คุณ{sender_name} สามารถเปิดดูประวัติย้อนหลังได้ที่นี่เลยค่ะ:\n"
+                f"🔗 {SPREADSHEET_URL}\n\n"
+                f"📌 *คำแนะนำ:* ให้เลือกดู Tab ด้านล่างชื่อ **`ส่วนตัว`** ค่ะ"
+            )
+            
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
+    # 📌 คำสั่งสรุปผลรายสัปดาห์ / รายเดือน
+    if raw_text in ["สรุปผล", "สรุปรายสัปดาห์", "รายงานความดัน"]:
+        summary_msg = get_health_summary(sender_name, group_id=group_id, days=7)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=summary_msg))
+        return
+
+    if raw_text in ["สรุปรายเดือน", "สรุปประจำเดือน"]:
+        summary_msg = get_health_summary(sender_name, group_id=group_id, days=30)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=summary_msg))
+        return
 
     if raw_text in ["กรอกค่าสุขภาพ", "กรอกข้อมูล", "เมนูกรอกข้อมูล"]:
         line_bot_api.reply_message(
@@ -389,7 +477,7 @@ def handle_text(event):
         return
 
     # ----------------------------------------------------
-    # การตอบกลับระบุชื่อผู้ส่งรายบุคคล
+    # การตอบกลับระบุชื่อผู้ส่งรายบุคคล + บันทึกลง Google Sheet
     # ----------------------------------------------------
 
     # 1. ความดันโลหิต
@@ -398,6 +486,15 @@ def handle_text(event):
         sys_val = int(bp_match.group(1))
         dia_val = int(bp_match.group(2))
         res = analyze_bp(sys_val, dia_val, sender_name=sender_name)
+        
+        save_to_google_sheet(
+            sender=sender_name, 
+            data_type="ความดัน", 
+            value=f"{sys_val}/{dia_val}", 
+            result_summary=f"SYS:{sys_val}, DIA:{dia_val}",
+            group_id=group_id
+        )
+
         line_bot_api.reply_message(
             reply_token, 
             TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 😊\n\n{res}")
@@ -410,6 +507,15 @@ def handle_text(event):
         if match:
             val = float(match.group(1))
             res = analyze_hba1c(val, sender_name=sender_name)
+            
+            save_to_google_sheet(
+                sender=sender_name, 
+                data_type="น้ำตาล HbA1c", 
+                value=f"{val}%", 
+                result_summary=f"HbA1c:{val}",
+                group_id=group_id
+            )
+
             line_bot_api.reply_message(
                 reply_token, 
                 TextSendMessage(text=f"บันทึกค่าน้ำตาลสะสมของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🍬\n\n{res}")
@@ -422,6 +528,15 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_fpg(val, sender_name=sender_name)
+            
+            save_to_google_sheet(
+                sender=sender_name, 
+                data_type="น้ำตาล FPG", 
+                value=f"{val} mg/dL", 
+                result_summary=f"FPG:{val}",
+                group_id=group_id
+            )
+
             line_bot_api.reply_message(
                 reply_token, 
                 TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🍬\n\n{res}")
@@ -434,6 +549,15 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_random_sugar(val, sender_name=sender_name)
+            
+            save_to_google_sheet(
+                sender=sender_name, 
+                data_type="น้ำตาลสุ่ม", 
+                value=f"{val} mg/dL", 
+                result_summary=f"Random:{val}",
+                group_id=group_id
+            )
+
             line_bot_api.reply_message(
                 reply_token, 
                 TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🍬\n\n{res}")
@@ -447,6 +571,15 @@ def handle_text(event):
             val = int(match.group(1))
             gender = "หญิง" if "หญิง" in raw_text else "ชาย"
             res = analyze_hdl(val, gender, sender_name=sender_name)
+            
+            save_to_google_sheet(
+                sender=sender_name, 
+                data_type="ไขมัน HDL", 
+                value=f"{val} mg/dL ({gender})", 
+                result_summary=f"HDL:{val}",
+                group_id=group_id
+            )
+
             line_bot_api.reply_message(
                 reply_token, 
                 TextSendMessage(text=f"บันทึกค่าไขมัน HDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🥑\n\n{res}")
@@ -459,6 +592,15 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_ldl(val, sender_name=sender_name)
+            
+            save_to_google_sheet(
+                sender=sender_name, 
+                data_type="ไขมัน LDL", 
+                value=f"{val} mg/dL", 
+                result_summary=f"LDL:{val}",
+                group_id=group_id
+            )
+
             line_bot_api.reply_message(
                 reply_token, 
                 TextSendMessage(text=f"บันทึกค่าไขมัน LDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🥑\n\n{res}")
@@ -471,6 +613,15 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_triglyceride(val, sender_name=sender_name)
+            
+            save_to_google_sheet(
+                sender=sender_name, 
+                data_type="ไตรกลีเซอไรด์", 
+                value=f"{val} mg/dL", 
+                result_summary=f"Triglyceride:{val}",
+                group_id=group_id
+            )
+
             line_bot_api.reply_message(
                 reply_token, 
                 TextSendMessage(text=f"บันทึกค่าไตรกลีเซอไรด์ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🥑\n\n{res}")
