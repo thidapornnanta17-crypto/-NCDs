@@ -1,4 +1,0 @@
-Flask
-gunicorn
-line-bot-sdk
-requests
