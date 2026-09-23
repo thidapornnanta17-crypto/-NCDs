@@ -22,7 +22,7 @@ LINE_CHANNEL_SECRET = os.environ.get(
     "490d4f5e36a60913923f3bd1c8768a15"
 ).strip()
 
-# 📌 วาง Web App URL จาก Google Apps Script (สำหรับระบบหลังบ้านบันทึกข้อมูล)
+# 📌 วาง Web App URL จาก Google Apps Script (สำหรับบันทึกข้อมูล)
 GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwQOToSsiM85k_PIcBoRwUUuZa7_U8y_7b2UKkgzABkXiYuNMI8tSAHg-K7d10pvQVO/exec"
 
 # 📌 ลิงก์ Google Sheets สำหรับผู้ใช้กดดู (สิทธิ์ Viewer)
@@ -31,6 +31,127 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnf
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# ==================== CAREGIVER SYSTEM (ระบบจำผู้ดูแล) ====================
+CAREGIVERS = {}
+
+def register_caregiver(group_id, user_id, display_name):
+    """บันทึกผู้ดูแลประจำกลุ่ม"""
+    if group_id not in CAREGIVERS:
+        CAREGIVERS[group_id] = []
+    
+    for c in CAREGIVERS[group_id]:
+        if c['user_id'] == user_id:
+            return f"คุณ {display_name} เป็นผู้ดูแลของกลุ่มนี้อยู่แล้วค่ะ 😊"
+            
+    CAREGIVERS[group_id].append({
+        "user_id": user_id,
+        "name": display_name
+    })
+    return f"บันทึก คุณ {display_name} เป็นผู้ดูแลประจำกลุ่มนี้เรียบร้อยแล้วค่ะ 👵👴"
+
+def create_caregiver_mention_msg(group_id, patient_name, sys_val, dia_val):
+    """สร้างข้อความพร้อมแท็ก @ลูกหลาน ผู้ดูแลในกลุ่ม เมื่อค่าความดันวิกฤต (สั่นและเด้งป๊อปอัปสเตตัส)"""
+    caregivers = CAREGIVERS.get(group_id, [])
+    
+    if not caregivers:
+        return TextSendMessage(
+            text=f"🚨 **แจ้งเตือนสุขภาพวิกฤต!**\n"
+                 f"ความดันของ คุณ{patient_name} สูงผิดปกติอยู่ในระดับอันตราย ({sys_val}/{dia_val} mmHg)\n"
+                 f"⚠️ ขอให้ลูกหลานในบ้านช่วยเช็กว่าลืมทานยาความดันมื้อล่าสุด หรือทานอาหารเค็มไปหรือไม่ค่ะ\n\n"
+                 f"💡 *คำแนะนำ:* สมาชิกที่เป็นผู้ดูแลสามารถพิมพ์ 'ฉันเป็นผู้ดูแล' เพื่อให้บอตแท็กแจ้งเตือนชื่อโดยตรงได้นะคะ"
+        )
+    
+    mention_header = "🚨 **แจ้งเตือนผู้ดูแลประจำบ้าน!**\n"
+    tag_list_text = ""
+    substitution_dict = {}
+    
+    for idx, c in enumerate(caregivers):
+        key_name = f"user{idx}"
+        tag_list_text += f"{{{key_name}}} "
+        substitution_dict[key_name] = {
+            "type": "mention",
+            "mentionee": {
+                "type": "user",
+                "userId": c['user_id']
+            }
+        }
+    
+    body_text = (
+        f"\n\nความดันของ คุณ{patient_name} สูงอยู่ในระดับอันตราย! ({sys_val}/{dia_val} mmHg)\n"
+        f"ขอความกรุณาช่วยตรวจสอบ:\n"
+        f"1. ทานยาลดความดันตรงเวลาหรือไม่? 💊\n"
+        f"2. มีอาการปวดศีรษะ ท้ายทอย หรือแน่นหน้าอกหรือไม่? 🏥"
+    )
+    
+    full_text = mention_header + tag_list_text + body_text
+    
+    return {
+        "type": "textV2",
+        "text": full_text,
+        "substitution": substitution_dict
+    } if hasattr(TextSendMessage, 'payload') else TextSendMessage(text=f"🚨 **แจ้งเตือนผู้ดูแล!** ความดัน คุณ{patient_name} สูงผิดปกติ ({sys_val}/{dia_val} mmHg)")
+
+# ==================== RED FLAG TRIAGE FLEX MESSAGE ====================
+
+def get_red_flag_triage_flex(sender_name="สมาชิก", sys_val=160, dia_val=100):
+    """การ์ดคัดกรองอาการวิกฤต (FAST & Chest Pain) ตามหลักพยาบาลฉุกเฉิน"""
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#D93025",
+            "contents": [
+                {"type": "text", "text": "🚨 ประเมินสัญญาณอันตราย (Red Flag Triage)", "weight": "bold", "color": "#FFFFFF", "size": "sm"},
+                {"type": "text", "text": f"ความดัน คุณ{sender_name} สูงระดับวิกฤต ({sys_val}/{dia_val} mmHg)", "color": "#FFD2D0", "size": "xs", "margin": "xs", "wrap": True}
+            ]
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "md",
+            "contents": [
+                {"type": "text", "text": "⚠️ หากมีอาการข้อใดข้อหนึ่งด้านล่างนี้ ให้ถือเป็นภาวะฉุกเฉินระดับวิกฤต (Emergent) ทันที!", "size": "xs", "color": "#D93025", "weight": "bold", "wrap": True},
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "xs",
+                    "backgroundColor": "#FCE8E6",
+                    "paddingAll": "10px",
+                    "cornerRadius": "md",
+                    "contents": [
+                        {"type": "text", "text": "1. 😦 หน้าเบี้ยว ปากเบี้ยว ยิ้มแล้วมุมปากตก", "size": "xs", "color": "#333333", "wrap": True},
+                        {"type": "text", "text": "2. 💪 แขนขาอ่อนแรงครึ่งซีก ยกไม่ขึ้น", "size": "xs", "color": "#333333", "wrap": True},
+                        {"type": "text", "text": "3. 🗣️ พูดไม่ชัด พูดติดขัด หรือสับสนนึกคำพูดไม่ออก", "size": "xs", "color": "#333333", "wrap": True},
+                        {"type": "text", "text": "4. 🫀 เจ็บแน่นหน้าอกรุนแรง เหมือนมีของหนักมากดทับ", "size": "xs", "color": "#333333", "wrap": True}
+                    ]
+                },
+                {"type": "text", "text": "กรุณากดปุ่มเพื่อเลือกประเมินอาการทันที:", "size": "xs", "color": "#666666", "align": "center"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#D93025",
+                    "height": "sm",
+                    "action": {"type": "message", "label": "⚠️ มีอาการวิกฤต (เรียกรถพยาบาล)", "text": "มีอาการวิกฤต"}
+                },
+                {
+                    "type": "button",
+                    "style": "secondary",
+                    "height": "sm",
+                    "action": {"type": "message", "label": "🟢 ไม่มีอาการข้างต้น (พักผ่อน/วัดซ้ำ)", "text": "ไม่มีอาการวิกฤต"}
+                }
+            ]
+        }
+    }
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -179,7 +300,7 @@ def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
             "• 💡 ความหมาย: แรงต้านทานในหลอดเลือดสูงชัดเจน หัวใจต้องทำงานหนักตลอดเวลาแม้ในขณะคลายตัว 🫀 เสี่ยงต่อภาวะกล้ามเนื้อหัวใจโต และไตเสื่อมเรื้อรัง 🩺\n"
             "• 💊 ข้อควรปฏิบัติเรื่องยา: ต้องพบแพทย์เพื่อรับยาลดความดันโลหิต 🚨 กฎเหล็ก: ทานยาให้ตรงเวลาสม่ำเสมอ ห้ามหยุดยาเองเด็ดขาด\n"
             "• 🏃‍♂️ กิจกรรมและการใช้ชีวิต: เน้นการออกกำลังกายที่ไม่หักโหม 🧘‍♂️ งดสูบบุหรี่ 🚭 ชา กาแฟ ☕ เครื่องดื่มชูกำลัง และแอลกอฮอล์ทุกชนิด 🍺 ฝึกผ่อนคลายกล้ามเนื้อและทำสมาธิ\n"
-            "• 🔍 การสังเกตอาการ: ปวดตึงบริเวณท้ายทอยหรือตึงคอบารมี 🤕 แน่นตึงหัวใจ เหนื่อยง่ายกว่าปกติเมื่อออกแรง 😮‍💨"
+            "• 🔍 การสังเกตอาการ: ปวดตึงบริเวณท้ายทอยหรือตึงคอบารมี 🤕 แน่นตึงหัวใจ เหนื่อยง่ายกว่าปกติเมื่อออกแรง 😮‍ศี"
         )
     else:
         dia_res = (
@@ -405,6 +526,39 @@ def handle_text(event):
     sender_name = get_sender_name(event)
     group_id = event.source.group_id if event.source.type == 'group' else "ส่วนตัว"
 
+    # 📌 คำสั่งตอบกลับผลประเมิน Red Flag Triage
+    if raw_text == "มีอาการวิกฤต":
+        emergency_card = (
+            f"🚨 **เตือนภัยระดับวิกฤตสูงสุด (Emergent Triage)!** 🚨\n\n"
+            f"คุณ{sender_name} มีสัญญาณเตือนของภาวะหลอดเลือดสมอง (Stroke) หรือหลอดเลือดหัวใจขาดเลือดเฉียบพลัน (MI) 🧠💔\n\n"
+            f"🛑 **ข้อควรปฏิบัติทันที:**\n"
+            f"1. 📞 **โทร 1669** เรียกรถพยาบาลฉุกเฉินทันที!\n"
+            f"2. 🧘‍♂️ นั่งพักในท่าที่สบาย ห้ามลุกเดินไปมา\n"
+            f"3. 🚫 **ห้ามขับรถไปโรงพยาบาลเองเด็ดขาด**\n"
+            f"4. 💊 ห้ามอมยาหรือทานยาเพิ่มเองโดยไม่มีคำสั่งแพทย์"
+        )
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=emergency_card))
+        return
+
+    if raw_text == "ไม่มีอาการวิกฤต":
+        safe_card = (
+            f"🟢 **ประเมินเบื้องต้น: ยังไม่พบสัญญาณอันตรายเฉียบพลัน**\n\n"
+            f"คุณ{sender_name} ควรปฏิบัติตามแนวทางดังนี้ค่ะ:\n"
+            f"1. 🧘‍♀️ นั่งพักในห้องที่อากาศถ่ายเท เงียบสงบ เป็นเวลา 15 นาที\n"
+            f"2. 💧 จิบน้ำสะอาด หลีกเลี่ยงชา กาแฟ หรือการเดินไปมา\n"
+            f"3. 🩺 วัดความดันซ้ำอีกครั้งหลังพักครบ 15 นาที\n"
+            f"4. 🏥 หากวัดซ้ำแล้วค่ายังสูงกว่า 160/100 mmHg แนะนำให้เดินทางไปพบแพทย์ที่โรงพยาบาลก่อนวันนัดค่ะ"
+        )
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=safe_card))
+        return
+
+    # 📌 คำสั่งลงทะเบียนผู้ดูแลประจำบ้าน (Home Ward & Caregiver System)
+    if raw_text in ["ฉันเป็นผู้ดูแล", "ลงทะเบียนผู้ดูแล", "เพิ่มผู้ดูแล"]:
+        user_id = event.source.user_id
+        res_msg = register_caregiver(group_id, user_id, sender_name)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=res_msg))
+        return
+
     # 📌 คำสั่งขอดูลิงก์ประวัติย้อนหลังใน Google Sheets
     if raw_text in ["ดูประวัติ", "ขอลิงก์", "ดูตาราง", "ดูแผ่นงาน"]:
         if event.source.type == 'group':
@@ -495,10 +649,26 @@ def handle_text(event):
             group_id=group_id
         )
 
-        line_bot_api.reply_message(
-            reply_token, 
-            TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 😊\n\n{res}")
-        )
+        # 📌 ตรวจสอบหากค่าความดันสูงระดับวิกฤต (SYS >= 160 หรือ DIA >= 100) ส่งแท็กผู้ดูแล + การ์ด Triage
+        if sys_val >= 160 or dia_val >= 100:
+            alert_msg = create_caregiver_mention_msg(group_id, sender_name, sys_val, dia_val)
+            triage_flex = FlexSendMessage(
+                alt_text="🚨 ประเมินสัญญาณอันตราย (Red Flag Triage)",
+                contents=get_red_flag_triage_flex(sender_name=sender_name, sys_val=sys_val, dia_val=dia_val)
+            )
+            line_bot_api.reply_message(
+                reply_token, 
+                [
+                    TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 😊\n\n{res}"),
+                    alert_msg if isinstance(alert_msg, TextSendMessage) else TextSendMessage(text="🚨 **แจ้งเตือนความดันสูงระดับวิกฤต!**"),
+                    triage_flex
+                ]
+            )
+        else:
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 😊\n\n{res}")
+            )
         return
 
     # 2. ค่าน้ำตาล HbA1c
@@ -628,13 +798,10 @@ def handle_text(event):
             )
             return
 
+# 📌 ปิดการตอบกลับรูปภาพทั่วไป เพื่อไม่ให้รบกวนแชตกลุ่มเวลาส่งรูปอื่นๆ
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
-    reply_token = event.reply_token
-    line_bot_api.reply_message(
-        reply_token,
-        FlexSendMessage(alt_text="กรุณากรอกข้อมูลความดัน/น้ำตาล/ไขมัน 📝", contents=get_bp_fallback_flex())
-    )
+    pass
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
