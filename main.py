@@ -28,7 +28,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # ==================== HELPER FUNCTIONS ====================
 
 def get_sender_name(event):
-    """ดึงชื่อผู้ส่งข้อความ"""
+    """ดึงชื่อผู้ส่งข้อความอัตโนมัติจาก LINE"""
     try:
         user_id = event.source.user_id
         if event.source.type == 'group':
@@ -42,9 +42,8 @@ def get_sender_name(event):
 
 # ==================== LOGIC คำสั่งที่ 1: วิเคราะห์ความดันโลหิต ====================
 
-def analyze_bp(sys_val, dia_val):
-    """วิเคราะห์ค่าความดันโลหิตตัวบน (SYS) และตัวล่าง (DIA) ตามเกณฑ์ที่กำหนด"""
-    # 1. วิเคราะห์ตัวบน (SYS)
+def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
+    """วิเคราะห์ค่าความดันโลหิตพร้อมระบุชื่อผู้ส่ง"""
     if sys_val < 90:
         sys_res = (
             "🔴 ค่าความดันตัวบน (SYS): ต่ำกว่า 90 mmHg | ความดันตัวบนต่ำ\n"
@@ -94,7 +93,6 @@ def analyze_bp(sys_val, dia_val):
             "• 🔍 การสังเกตอาการวิกฤต (📞 โทร 1669 หรือไปห้องฉุกเฉินทันที): ปวดศีรษะรุนแรงเฉียบพลัน 🤕 / แขนขาอ่อนแรงครึ่งซีก ปากเบี้ยว พูดไม่ชัด สับสน, เจ็บแน่นหน้าอกเหมือนมีอะไรมากดทับ 🫀 ปวดร้าวไปที่แขนหรือหลัง / หายใจหอบเหนื่อย 😮‍💨, มองเห็นภาพซ้อน ตาพร่ามัว หรือมองไม่เห็นเฉียบพลัน 👁️"
         )
 
-    # 2. วิเคราะห์ตัวล่าง (DIA)
     if dia_val < 60:
         dia_res = (
             "🔴 ค่าความดันตัวล่าง (DIA): ต่ำกว่า 60 mmHg | ความดันตัวล่างต่ำ\n"
@@ -136,7 +134,7 @@ def analyze_bp(sys_val, dia_val):
             "• 🔍 การสังเกตอาการวิกฤต (📞 โทร 1669 หรือไปห้องฉุกเฉินทันที): ปวดศีรษะรุนแรงเฉียบพลัน 🤕 / สับสน แขนขาอ่อนแรงครึ่งซีก หน้าเบี้ยว ปากเบี้ยว พูดไม่ชัด, เจ็บแน่นหน้าอกรุนแรง 🫀 หายใจหอบเหนื่อยเหมือนจะขาดใจ 😮‍💨, มองเห็นภาพซ้อน หรือตาดับมืดไปทันที 👁️"
         )
 
-    return f"📊 ผลการวิเคราะห์ความดันโลหิต:\n\n1️⃣ {sys_res}\n\n2️⃣ {dia_res}"
+    return f"📊 ผลการวิเคราะห์ความดันโลหิตของ คุณ{sender_name} 🩺\n\n1️⃣ {sys_res}\n\n2️⃣ {dia_res}"
 
 # ==================== LOGIC คำสั่งที่ 3: วิเคราะห์ค่าน้ำตาล ====================
 
@@ -157,7 +155,7 @@ TEXT_SUGAR_EMERGENCY = (
     "  3) รีบไปพบแพทย์ทันที 🏥 ห้ามเพิ่มยาเองโดยไม่ได้รับคำสั่งจากแพทย์ 🚫💊"
 )
 
-def analyze_fpg(val):
+def analyze_fpg(val, sender_name="สมาชิก"):
     if val < 100:
         res = (
             "🟢 Normal (< 100 mg/dL): ระดับปกติ\n"
@@ -173,7 +171,7 @@ def analyze_fpg(val):
             "  - 🏃‍♂️ กิจกรรม: ออกกำลังกายระดับปานกลาง (เดินเร็ว, ปั่นจักรยาน) 🚴‍♂️ อย่างน้อย 150 นาที/สัปดาห์\n"
             "• 🔍 สังเกตอาการ: มักยังไม่มีอาการผิดปกติ จึงควรตรวจเลือดซ้ำทุก 6-12 เดือน 🩺"
         )
-    else: # val >= 126
+    else:
         res = (
             "🔴 High (≥ 126 mg/dL): เข้าเกณฑ์โรคเบาหวาน (Diabetes)\n"
             "• 💡 ความหมาย: ตับอ่อนผลิตอินซูลินไม่เพียงพอ หรือร่างกายดื้อต่ออินซูลินสูงทำให้น้ำตาลค้างในเลือดมาก 🩺\n"
@@ -182,9 +180,9 @@ def analyze_fpg(val):
             "  - 🏃‍♂️ กิจกรรม: ออกกำลังกายหลังอาหารประมาณ 30-60 นาที ช่วยลดน้ำตาลในเลือดได้ดี 🚶‍♂️\n"
             "• 🔍 สังเกตอาการ: หิวน้ำบ่อย 🥛, ปัสสาวะบ่อย (โดยเฉพาะตอนกลางคืน) 🚽, น้ำหนักลดโดยไม่ทราบสาเหตุ ⚖️, อ่อนเพลีย 😴, แผลหายช้า 🩹"
         )
-    return f"🩸 ผลการวิเคราะห์น้ำตาลหลังอดอาหาร (FPG): {val} mg/dL\n\n{res}{TEXT_SUGAR_EMERGENCY}"
+    return f"🩸 ผลการวิเคราะห์น้ำตาลหลังอดอาหาร (FPG) ของ คุณ{sender_name}: {val} mg/dL\n\n{res}{TEXT_SUGAR_EMERGENCY}"
 
-def analyze_hba1c(val):
+def analyze_hba1c(val, sender_name="สมาชิก"):
     if val < 5.7:
         res = (
             "🟢 Normal (< 5.7%): ระดับปกติ\n"
@@ -196,7 +194,7 @@ def analyze_hba1c(val):
             "• 💡 ความหมาย: คุมน้ำตาลในช่วง 2-3 เดือนที่ผ่านมาได้ไม่ดีพอ มีโอกาสพัฒนาเป็นเบาหวานสูง ⚠️\n"
             "• 🛠️ ข้อควรปฏิบัติ: ปรับพฤติกรรมด่วน 🚨 คุมแป้งและน้ำตาล 🍚❌ ควบคุมน้ำหนักตัวให้อยู่ในเกณฑ์มาตรฐาน ⚖️"
         )
-    else: # val >= 6.5
+    else:
         res = (
             "🔴 High (≥ 6.5%): เป็นโรคเบาหวาน\n"
             "• 💡 ความหมาย: น้ำตาลในเลือดสูงสะสมเป็นเวลานาน เพิ่มความเสี่ยงต่อภาวะแทรกซ้อน (เบาหวานขึ้นตา 👁️, ไตเสื่อม 🩺, ชาปลายมือปลายเท้า 🦶)\n"
@@ -204,9 +202,9 @@ def analyze_hba1c(val):
             "  - 💊 เรื่องยา: ทานยาตรงเวลาตามแพทย์สั่งอย่างเคร่งครัด 👨‍⚕️\n"
             "  - 🔍 การสังเกตอาการภาวะแทรกซ้อน: ตรวจเช็กสุขภาพตาปีละครั้ง 👓, ดูแลเท้าไม่ให้เกิดแผล 🦶, สังเกตอาการชาปลายมือปลายเท้า 🖐️"
         )
-    return f"🩸 ผลการวิเคราะห์น้ำตาลสะสม (HbA1c): {val}%\n\n{res}{TEXT_SUGAR_EMERGENCY}"
+    return f"🩸 ผลการวิเคราะห์น้ำตาลสะสม (HbA1c) ของ คุณ{sender_name}: {val}%\n\n{res}{TEXT_SUGAR_EMERGENCY}"
 
-def analyze_random_sugar(val):
+def analyze_random_sugar(val, sender_name="สมาชิก"):
     if val < 140:
         res = (
             "🟢 Normal (< 140 mg/dL): ระดับปกติ\n"
@@ -218,16 +216,16 @@ def analyze_random_sugar(val):
             "• 💡 ความหมาย: ร่างกายเริ่มจัดการน้ำตาลหลังมื้ออาหารได้ช้าลง ⚠️\n"
             "• 🛠️ ข้อควรปฏิบัติ: ปรับมื้ออาหารให้เป็นมื้อเล็กๆ 🥗 ทานใยอาหาร (ผักใบเขียว) ก่อนทานแป้ง เพื่อช่วยชะลอการดูดซึมน้ำตาล 🥦"
         )
-    else: # val >= 200
+    else:
         res = (
             "🔴 High (≥ 200 mg/dL): เข้าเกณฑ์โรคเบาหวาน (ร่วมกับมีอาการ)\n"
             "• 💡 ความหมาย: น้ำตาลในเลือดสูงมาก ร่างกายไม่สามารถนำน้ำตาลหลังมื้ออาหารไปใช้ได้ทัน 🚨"
         )
-    return f"🩸 ผลการวิเคราะห์น้ำตาลสุ่ม/หลังอาหาร 2 ชม.: {val} mg/dL\n\n{res}{TEXT_SUGAR_EMERGENCY}"
+    return f"🩸 ผลการวิเคราะห์น้ำตาลสุ่ม/หลังอาหาร ของ คุณ{sender_name}: {val} mg/dL\n\n{res}{TEXT_SUGAR_EMERGENCY}"
 
 # ==================== LOGIC คำสั่งที่ 4: วิเคราะห์ไขมัน ====================
 
-def analyze_hdl(val, gender="ชาย"):
+def analyze_hdl(val, gender="ชาย", sender_name="สมาชิก"):
     is_low = (gender == "ชาย" and val < 40) or (gender == "หญิง" and val < 50)
     if is_low:
         level_str = "🔴 ต่ำกว่าเกณฑ์มาตรฐาน = อันตราย (รถเก็บขยะน้อย ไขมันเกาะหลอดเลือดง่าย) ⚠️"
@@ -237,7 +235,7 @@ def analyze_hdl(val, gender="ชาย"):
         level_str = "🟢 60 mg/dL ขึ้นไป = ดีมาก (ช่วยปกป้องหัวใจและหลอดเลือด) 🛡️🫀"
 
     return (
-        f"🟡 ผลการวิเคราะห์ค่า HDL (ไขมันดี / ไขมันขยะ): {val} mg/dL ({gender})\n"
+        f"🟡 ผลการวิเคราะห์ค่า HDL (ไขมันดี) ของ คุณ{sender_name}: {val} mg/dL ({gender})\n"
         f"• 💡 นิยาม: 'รถเก็บขยะประจำหลอดเลือด' 🚛 คอยวิ่งไปเก็บกวาดไขมันส่วนเกินที่เกาะตามผนังหลอดเลือด แล้วนำกลับไปทำลายที่ตับ ยิ่งมีค่านี้สูง หลอดเลือดยิ่งสะอาดและปลอดภัย ✨\n"
         f"• 📊 ประเมินผล: {level_str}\n\n"
         f"💡 ข้อควรปฏิบัติสำหรับคนไข้ (เพื่อเพิ่มค่า HDL):\n"
@@ -248,7 +246,7 @@ def analyze_hdl(val, gender="ชาย"):
         f"• 🔍 การสังเกตอาการ: ค่า HDL ต่ำจะ 'ไม่มีอาการเตือนทางร่างกาย' 🤫 แต่ส่งผลให้เกิดการสะสมของไขมันตัวร้ายได้เร็วขึ้น ต้องติดตามผ่านการตรวจเลือดเท่านั้น 🩺"
     )
 
-def analyze_ldl(val):
+def analyze_ldl(val, sender_name="สมาชิก"):
     if val < 100:
         level_str = "🟢 น้อยกว่า 100 mg/dL = เหมาะสมที่สุด ✨"
     elif 100 <= val <= 129:
@@ -261,7 +259,7 @@ def analyze_ldl(val):
         level_str = "🔴 190 mg/dL ขึ้นไป = สูงมากอันตราย 💥"
 
     return (
-        f"🟠 ผลการวิเคราะห์ค่า LDL (ไขมันเลว / ไขมันตะกรัน): {val} mg/dL\n"
+        f"🟠 ผลการวิเคราะห์ค่า LDL (ไขมันเลว) ของ คุณ{sender_name}: {val} mg/dL\n"
         f"• 💡 นิยาม: 'ตัวพาขยะมาทิ้ง' ⚠️ นำไขมันไปสะสมและพอกไว้ตามผนังหลอดเลือด ยิ่งมีมาก หลอดเลือดจะยิ่งตีบ แข็ง และอุดตัน เหมือนท่อน้ำที่มีตะกรันเกาะจนน้ำไหลผ่านไม่ได้ 🫀\n"
         f"• 📊 ประเมินผล: {level_str}\n"
         f"*(หมายเหตุ: หากคนไข้เป็นโรคเบาหวานหรือโรคหัวใจอยู่แล้ว แพทย์อาจตั้งเป้าหมายให้ต่ำกว่า 70 หรือ 55 mg/dL)*\n\n"
@@ -278,7 +276,7 @@ def analyze_ldl(val):
         f"  - Xanthoma: ตุ่มแข็งตามข้อศอก ข้อเข่า หรือบริเวณเอ็นร้อยหวาย 🦵"
     )
 
-def analyze_triglyceride(val):
+def analyze_triglyceride(val, sender_name="สมาชิก"):
     if val < 150:
         level_str = "🟢 น้อยกว่า 150 mg/dL = ปกติ ✨"
     elif 150 <= val <= 199:
@@ -289,7 +287,7 @@ def analyze_triglyceride(val):
         level_str = "🔴 500 mg/dL ขึ้นไป = สูงมากอันตราย (เสี่ยงต่อภาวะตับอ่อนอักเสบเฉียบพลัน) 💥"
 
     return (
-        f"🔴 ผลการวิเคราะห์ค่า Triglyceride (ไขมันแป้งและน้ำตาล): {val} mg/dL\n"
+        f"🔴 ผลการวิเคราะห์ค่า Triglyceride ของ คุณ{sender_name}: {val} mg/dL\n"
         f"• 💡 นิยาม: เป็นไขมันที่ร่างกายสร้างขึ้นเวลาเรา 'กินแป้ง น้ำตาล และแอลกอฮอล์ มากเกินกว่าที่ร่างกายใช้หมด' 🥐🧋 พลังงานส่วนเกินจะถูกเปลี่ยนเป็นไตรกลีเซอไรด์เก็บไว้ตามรอบเอว 🧍‍♂️ ตับ และกระแสเลือด\n"
         f"• 📊 ประเมินผล: {level_str}\n\n"
         f"💡 ข้อควรปฏิบัติสำหรับคนไข้ (เพื่อลดค่า Triglyceride):\n"
@@ -305,7 +303,6 @@ def analyze_triglyceride(val):
 # ==================== FALLBACK FLEX MESSAGES ====================
 
 def get_bp_fallback_flex():
-    """คำสั่งที่ 2: Flex Message กรณีแจ้งให้ผู้ใช้กรอกตัวเลขด้วยตนเอง"""
     return {
         "type": "bubble",
         "body": {
@@ -348,11 +345,10 @@ def callback():
 def handle_text(event):
     reply_token = event.reply_token
     raw_text = event.message.text.strip()
+    
+    # 📌 ดึงชื่อ Display Name ของคนที่พิมพ์ในกลุ่มทันที
     sender_name = get_sender_name(event)
 
-    # ----------------------------------------------------
-    # เมนูการ์ดเลือกกรอกข้อมูล (Flex Message)
-    # ----------------------------------------------------
     if raw_text in ["กรอกค่าสุขภาพ", "กรอกข้อมูล", "เมนูกรอกข้อมูล"]:
         line_bot_api.reply_message(
             reply_token,
@@ -363,9 +359,6 @@ def handle_text(event):
         )
         return
 
-    # ----------------------------------------------------
-    # เมนูแนะนำการกรอกข้อมูล (คำสั่งที่ 2, 3, 4)
-    # ----------------------------------------------------
     if raw_text in ["กรอกความดัน", "พิมพ์ความดัน"]:
         msg = (
             f"คุณ {sender_name} กรุณากรอกค่าความดันโลหิตในรูปแบบ:\n\n"
@@ -396,78 +389,96 @@ def handle_text(event):
         return
 
     # ----------------------------------------------------
-    # ตรวจจับการกรอกค่า ความดัน / น้ำตาล / ไขมัน จากข้อความ
+    # การตอบกลับระบุชื่อผู้ส่งรายบุคคล
     # ----------------------------------------------------
 
-    # 1. การกรอกค่าความดัน (เช่น 120/80 หรือ ความดัน 135/85)
+    # 1. ความดันโลหิต
     bp_match = re.search(r'(\d{2,3})\s*/\s*(\d{2,3})', raw_text)
     if bp_match:
         sys_val = int(bp_match.group(1))
         dia_val = int(bp_match.group(2))
-        res = analyze_bp(sys_val, dia_val)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"สวัสดีครับคุณ {sender_name} 👋\n\n{res}"))
+        res = analyze_bp(sys_val, dia_val, sender_name=sender_name)
+        line_bot_api.reply_message(
+            reply_token, 
+            TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 😊\n\n{res}")
+        )
         return
 
-    # 2. การกรอกค่าน้ำตาล HbA1c (เช่น HbA1c 6.2 หรือ สะสม 5.8)
+    # 2. ค่าน้ำตาล HbA1c
     if 'hba1c' in raw_text.lower() or 'สะสม' in raw_text:
         match = re.search(r'(\d+(\.\d+)?)', raw_text)
         if match:
             val = float(match.group(1))
-            res = analyze_hba1c(val)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"เรียนคุณ {sender_name} 👋\n\n{res}"))
+            res = analyze_hba1c(val, sender_name=sender_name)
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าน้ำตาลสะสมของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🍬\n\n{res}")
+            )
             return
 
-    # 3. การกรอกค่าน้ำตาล FPG (เช่น FPG 110 หรือ อดอาหาร 95)
+    # 3. ค่าน้ำตาล FPG
     if 'fpg' in raw_text.lower() or 'อดอาหาร' in raw_text:
         match = re.search(r'(\d+)', raw_text)
         if match:
             val = int(match.group(1))
-            res = analyze_fpg(val)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"เรียนคุณ {sender_name} 👋\n\n{res}"))
+            res = analyze_fpg(val, sender_name=sender_name)
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🍬\n\n{res}")
+            )
             return
 
-    # 4. การกรอกค่าน้ำตาลสุ่ม/หลังอาหาร (เช่น สุ่ม 150 หรือ หลังอาหาร 160)
+    # 4. ค่าน้ำตาลสุ่ม/หลังอาหาร
     if 'สุ่ม' in raw_text or 'หลังอาหาร' in raw_text or 'random' in raw_text.lower():
         match = re.search(r'(\d+)', raw_text)
         if match:
             val = int(match.group(1))
-            res = analyze_random_sugar(val)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"เรียนคุณ {sender_name} 👋\n\n{res}"))
+            res = analyze_random_sugar(val, sender_name=sender_name)
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🍬\n\n{res}")
+            )
             return
 
-    # 5. การกรอกค่า HDL (เช่น HDL 45 หญิง หรือ HDL 38 ชาย)
+    # 5. ค่า HDL
     if 'hdl' in raw_text.lower():
         match = re.search(r'(\d+)', raw_text)
         if match:
             val = int(match.group(1))
             gender = "หญิง" if "หญิง" in raw_text else "ชาย"
-            res = analyze_hdl(val, gender)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"เรียนคุณ {sender_name} 👋\n\n{res}"))
+            res = analyze_hdl(val, gender, sender_name=sender_name)
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าไขมัน HDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🥑\n\n{res}")
+            )
             return
 
-    # 6. การกรอกค่า LDL (เช่น LDL 145)
+    # 6. ค่า LDL
     if 'ldl' in raw_text.lower():
         match = re.search(r'(\d+)', raw_text)
         if match:
             val = int(match.group(1))
-            res = analyze_ldl(val)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"เรียนคุณ {sender_name} 👋\n\n{res}"))
+            res = analyze_ldl(val, sender_name=sender_name)
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าไขมัน LDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🥑\n\n{res}")
+            )
             return
 
-    # 7. การกรอกค่า Triglyceride (เช่น Triglyceride 220 หรือ ไตรกลีเซอไรด์ 180)
+    # 7. ค่า Triglyceride
     if 'triglyceride' in raw_text.lower() or 'ไตรกลีเซอไรด์' in raw_text:
         match = re.search(r'(\d+)', raw_text)
         if match:
             val = int(match.group(1))
-            res = analyze_triglyceride(val)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"เรียนคุณ {sender_name} 👋\n\n{res}"))
+            res = analyze_triglyceride(val, sender_name=sender_name)
+            line_bot_api.reply_message(
+                reply_token, 
+                TextSendMessage(text=f"บันทึกค่าไตรกลีเซอไรด์ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ 🥑\n\n{res}")
+            )
             return
 
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
-    """
-    คำสั่งที่ 2: หากผู้ใช้ส่งรูปภาพเข้ามา ให้ตอบกลับด้วย Flex Message ให้เลือกพิมพ์ค่าด้วยตนเองทันที
-    """
     reply_token = event.reply_token
     line_bot_api.reply_message(
         reply_token,
