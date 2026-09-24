@@ -6,7 +6,8 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, ImageMessage, TextMessage, TextSendMessage, FlexSendMessage
+    MessageEvent, ImageMessage, TextMessage, TextSendMessage, FlexSendMessage, JoinEvent,
+    QuickReply, QuickReplyButton, MessageAction
 )
 
 app = Flask(__name__)
@@ -22,21 +23,29 @@ LINE_CHANNEL_SECRET = os.environ.get(
     "490d4f5e36a60913923f3bd1c8768a15"
 ).strip()
 
-# วาง Web App URL จาก Google Apps Script (สำหรับบันทึกข้อมูล)
 GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwYCjs74ZKt0nUrkhiJHdRlvPUjtfA9zOn9FqF934ZQTV511DYG5Y2djtgN68xsQqmY/exec"
-
-# ลิงก์ Google Sheets สำหรับผู้ใช้กดดู (สิทธิ์ Viewer)
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnfsesvCMsdA7KxvRbKSUpyls/edit?usp=sharing"
 
 # =================================================================
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# ==================== CAREGIVER SYSTEM (ระบบจำผู้ดูแล) ====================
+# ==================== QUICK REPLY MENU (ปุ่มเมนูลอยสำหรับกลุ่ม) ====================
+def get_main_quick_reply():
+    """ชุดปุ่มกดด่วนทางลัด สำหรับใช้งานในกลุ่มแทน Rich Menu"""
+    return QuickReply(
+        items=[
+            QuickReplyButton(action=MessageAction(label="📊 ดูสรุปผล", text="สรุปผล")),
+            QuickReplyButton(action=MessageAction(label="🏥 กรอกค่าสุขภาพ", text="กรอกค่าสุขภาพ")),
+            QuickReplyButton(action=MessageAction(label="🔗 ลิงก์ตาราง Sheets", text="ดูประวัติ")),
+            QuickReplyButton(action=MessageAction(label="💡 ลงทะเบียนผู้ดูแล", text="ฉันเป็นผู้ดูแล"))
+        ]
+    )
+
+# ==================== CAREGIVER SYSTEM ====================
 CAREGIVERS = {}
 
 def register_caregiver(group_id, user_id, display_name):
-    """บันทึกผู้ดูแลประจำกลุ่ม"""
     if group_id not in CAREGIVERS:
         CAREGIVERS[group_id] = []
     for c in CAREGIVERS[group_id]:
@@ -49,14 +58,14 @@ def register_caregiver(group_id, user_id, display_name):
     return f"บันทึก คุณ {display_name} เป็นผู้ดูแลประจำกลุ่มนี้เรียบร้อยแล้วค่ะ"
 
 def create_caregiver_mention_msg(group_id, patient_name, sys_val, dia_val):
-    """สร้างข้อความพร้อมแท็ก @ลูกหลาน ผู้ดูแลในกลุ่ม เมื่อค่าความดันวิกฤต"""
     caregivers = CAREGIVERS.get(group_id, [])
     if not caregivers:
         return TextSendMessage(
             text=f"🚨 **แจ้งเตือนสุขภาพวิกฤต!**\n"
                  f"ความดันของ คุณ{patient_name} สูงผิดปกติอยู่ในระดับอันตราย ({sys_val}/{dia_val} mmHg) ค่ะ\n\n"
                  f"⚠️ ขอให้ลูกหลานในบ้านช่วยเช็กว่าลืมทานยาความดันมื้อล่าสุด หรือทานอาหารเค็มไปหรือไม่\n"
-                 f"💡 *คำแนะนำ:* สมาชิกที่เป็นผู้ดูแลสามารถพิมพ์ 'ฉันเป็นผู้ดูแล' เพื่อให้บอตแท็กแจ้งเตือนชื่อโดยตรงได้นะคะ"
+                 f"💡 *คำแนะนำ:* สมาชิกที่เป็นผู้ดูแลสามารถพิมพ์ 'ฉันเป็นผู้ดูแล' เพื่อให้บอตแท็กแจ้งเตือนชื่อโดยตรงได้นะคะ",
+            quick_reply=get_main_quick_reply()
         )
     
     mention_header = "🚨 **แจ้งเตือนผู้ดูแลประจำบ้าน!**\n"
@@ -85,14 +94,15 @@ def create_caregiver_mention_msg(group_id, patient_name, sys_val, dia_val):
     return {
         "type": "textV2",
         "text": full_text,
-        "substitution": substitution_dict
+        "substitution": substitution_dict,
+        "quickReply": get_main_quick_reply().as_json_dict()
     } if hasattr(TextSendMessage, 'payload') else TextSendMessage(
-        text=f"🚨 **แจ้งเตือนผู้ดูแล!** ความดัน คุณ{patient_name} สูงผิดปกติ ({sys_val}/{dia_val} mmHg)"
+        text=f"🚨 **แจ้งเตือนผู้ดูแล!** ความดัน คุณ{patient_name} สูงผิดปกติ ({sys_val}/{dia_val} mmHg)",
+        quick_reply=get_main_quick_reply()
     )
 
 # ==================== RED FLAG TRIAGE FLEX MESSAGE ====================
 def get_red_flag_triage_flex(sender_name="สมาชิก", sys_val=160, dia_val=100):
-    """การ์ดคัดกรองอาการวิกฤต (FAST & Chest Pain) ตามหลักพยาบาลฉุกเฉิน"""
     return {
         "type": "bubble",
         "size": "mega",
@@ -152,7 +162,6 @@ def get_red_flag_triage_flex(sender_name="สมาชิก", sys_val=160, dia_
 
 # ==================== HELPER FUNCTIONS ====================
 def get_sender_name(event):
-    """ดึงชื่อผู้ส่งข้อความอัตโนมัติจาก LINE"""
     try:
         user_id = event.source.user_id
         if event.source.type == 'group':
@@ -165,7 +174,6 @@ def get_sender_name(event):
         return "สมาชิก"
 
 def save_to_google_sheet(sender, data_type, value, result_summary, group_id="ส่วนตัว"):
-    """ส่งข้อมูลไปบันทึกลง Sheet (สร้าง Tab ตาม group_id อัตโนมัติ)"""
     try:
         payload = {
             "action": "log",
@@ -180,7 +188,6 @@ def save_to_google_sheet(sender, data_type, value, result_summary, group_id="ส
         print(f"❌ บันทึก Google Sheet ไม่สำเร็จ: {e}")
 
 def get_health_summary(sender, group_id="ส่วนตัว", days=7):
-    """ดึงข้อมูลสรุปผลความดันเฉลี่ยย้อนหลัง ตามจำนวนวัน (7 วัน หรือ 30 วัน)"""
     try:
         url = f"{GOOGLE_SHEET_URL}?action=summary&sender={sender}&groupId={group_id}&days={days}"
         response = requests.get(url, timeout=5)
@@ -213,7 +220,7 @@ def get_health_summary(sender, group_id="ส่วนตัว", days=7):
     except Exception as e:
         return "❌ ไม่สามารถดึงข้อมูลสรุปผลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
 
-# ==================== LOGIC คำสั่งที่ 1: วิเคราะห์ความดันโลหิต ====================
+# ==================== LOGIC MEDICAL ANALYZERS (ข้อความวิเคราะห์ฉบับเต็ม) ====================
 def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
     if sys_val < 90:
         sys_res = (
@@ -269,7 +276,7 @@ def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
             "🔵 ค่าความดันตัวล่าง (DIA): ต่ำกว่า 60 mmHg | ความดันตัวล่างต่ำ\n"
             "• ความหมาย: แรงดันช่วงหัวใจคลายตัวน้อยกว่าปกติ อาจเกิดจากหลอดเลือดขยายตัวมาก การขาดน้ำ พักผ่อนไม่พอ หรือผลข้างเคียงจากยาลดความดัน\n"
             "• ข้อควรปฏิบัติเรื่องยา: หากรับประทานยาลดความดันอยู่ อย่าเพิ่งหยุดยาเอง ให้จดบันทึกค่าความดันเช้า-เย็น แล้วนำไปปรึกษาแพทย์ หลีกเลี่ยงการซื้อยาสมุนไพร หรือยาแก้ปวดทานเอง\n"
-            "• กิจกรรมและการใช้ชีวิต: ค่อยๆ เปลี่ยนท่าทาง จิบน้ำสะอาดสม่ำเสมอตลอดวัน (2-2.5 ลิตร/วัน) หลีกเลี่ยงการแช่น้ำอุ่นจัด เข้าซาวน่า หรือยืนตากแดดนานๆ\n"
+            "• กิจกรรมและการใช้ชีวิต: ค่อยๆ เปลี่ยนท่าทาง จิบน้ำสะอาดสม่ำเสมอตตลอดวัน (2-2.5 ลิตร/วัน) หลีกเลี่ยงการแช่น้ำอุ่นจัด เข้าซาวน่า หรือยืนตากแดดนานๆ\n"
             "• การสังเกตอาการ: หากไม่มีอาการผิดปกติ ถือว่ายังไม่น่ากังวล! อาการเตือน: วิงเวียนศีรษะ อ่อนเพลีย หน้ามืด วูบ หรือใจสั่นเวลาลุกยืน ควรรีบนั่งพักทันที หากไม่ดีขึ้นควรไปพบแพทย์"
         )
     elif 60 <= dia_val <= 79:
@@ -306,7 +313,6 @@ def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
         )
     return f"🩺 ผลการวิเคราะห์ความดันโลหิตของ คุณ{sender_name}\n\n1️⃣ {sys_res}\n\n2️⃣ {dia_res}"
 
-# ==================== LOGIC คำสั่งที่ 3: วิเคราะห์ค่าน้ำตาล ====================
 TEXT_SUGAR_EMERGENCY = (
     "\n\n🚨 ภาวะฉุกเฉินที่ต้องระวังเป็นพิเศษ:\n\n"
     "1. ภาวะน้ำตาลในเลือดต่ำ (Hypoglycemia) : ค่าต่ำกว่า 70 mg/dL\n"
@@ -392,7 +398,6 @@ def analyze_random_sugar(val, sender_name="สมาชิก"):
         )
     return f"🩸 ผลการวิเคราะห์น้ำตาลสุ่ม/หลังอาหาร ของ คุณ{sender_name}: {val} mg/dL\n\n{res}{TEXT_SUGAR_EMERGENCY}"
 
-# ==================== LOGIC คำสั่งที่ 4: วิเคราะห์ไขมัน ====================
 def analyze_hdl(val, gender="ชาย", sender_name="สมาชิก"):
     is_low = (gender == "ชาย" and val < 40) or (gender == "หญิง" and val < 50)
     if is_low:
@@ -468,7 +473,6 @@ def analyze_triglyceride(val, sender_name="สมาชิก"):
         f"• 🚨 การสังเกตอาการอันตราย (ภาวะตับอ่อนอักเสบ): หากไตรกลีเซอไรด์สูงมากแล้วมีอาการปวดท้องรุนแรงบริเวณลิ้นปี่ ปวดทะลุไปถึงหลัง 🤢 ร่วมกับคลื่นไส้อาเจียน 🤮 ควรรีบมาพบแพทย์ทันที 🏥"
     )
 
-# ==================== FALLBACK FLEX MESSAGES ====================
 def get_bp_fallback_flex():
     return {
         "type": "bubble",
@@ -477,7 +481,7 @@ def get_bp_fallback_flex():
             "layout": "vertical",
             "contents": [
                 {"type": "text", "text": "⚠️ กรุณากรอกข้อมูลเพื่อวิเคราะห์ผล", "weight": "bold", "color": "#1DB446", "size": "md"},
-                {"type": "text", "text": "กรุณากดปุ่มด้านล่างเพื่อเลือกกรอกค่าความดัน ค่าน้ำตาล หรือค่าไขมัน ด้วยตนเองได้เลยครับ 📝", "wrap": True, "color": "#666666", "size": "xs", "margin": "md"}
+                {"type": "text", "text": "กดเลือกหมวดหมู่ข้อมูลสุขภาพด้านล่างได้เลยครับ 📝", "wrap": True, "color": "#666666", "size": "xs", "margin": "md"}
             ]
         },
         "footer": {
@@ -507,6 +511,22 @@ def callback():
         abort(400)
     return 'OK'
 
+@handler.add(JoinEvent)
+def handle_join(event):
+    welcome_text = (
+        "สวัสดีค่ะทุกคน! 👋👵👴\n"
+        "ยินดีต้อนรับสู่ระบบบันทึกและติดตามสุขภาพประจำกลุ่มค่ะ 🩺✨\n\n"
+        "📌 คุณสามารถพิมพ์ส่งค่าสุขภาพในกลุ่มนี้ได้ทันที เช่น:\n"
+        "• ความดัน: พิมพ์ เช่น 120/80\n"
+        "• น้ำตาล: พิมพ์ เช่น fpg 105 หรือ สะสม 6.2\n"
+        "• ไขมัน: พิมพ์ เช่น ldl 130 หรือ hdl 45 ชาย\n\n"
+        "💡 พิมพ์ 'ฉันเป็นผู้ดูแล' เพื่อลงทะเบียนผู้ดูแลประจำบ้านได้เลยค่ะ"
+    )
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=welcome_text, quick_reply=get_main_quick_reply())
+    )
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
     reply_token = event.reply_token
@@ -514,7 +534,6 @@ def handle_text(event):
     sender_name = get_sender_name(event)
     group_id = event.source.group_id if event.source.type == 'group' else "ส่วนตัว"
 
-    # คำสั่งตอบกลับผลประเมิน Red Flag Triage
     if raw_text == "มีอาการวิกฤต":
         emergency_card = (
             f"🚨 **เตือนภัยระดับวิกฤตสูงสุด (Emergent Triage)!**\n\n"
@@ -525,7 +544,7 @@ def handle_text(event):
             f"3. **ห้ามขับรถไปโรงพยาบาลเองเด็ดขาด**\n"
             f"4. ห้ามอมยาหรือทานยาเพิ่มเองโดยไม่มีคำสั่งแพทย์"
         )
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=emergency_card))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=emergency_card, quick_reply=get_main_quick_reply()))
         return
 
     if raw_text == "ไม่มีอาการวิกฤต":
@@ -537,17 +556,15 @@ def handle_text(event):
             f"3. วัดความดันซ้ำอีกครั้งหลังพักครบ 15 นาที\n"
             f"4. หากวัดซ้ำแล้วค่ายังสูงกว่า 160/100 mmHg แนะนำให้เดินทางไปพบแพทย์ที่โรงพยาบาลก่อนวันนัดค่ะ"
         )
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=safe_card))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=safe_card, quick_reply=get_main_quick_reply()))
         return
 
-    # คำสั่งลงทะเบียนผู้ดูแลประจำบ้าน (Home Ward & Caregiver System)
     if raw_text in ["ฉันเป็นผู้ดูแล", "ลงทะเบียนผู้ดูแล", "เพิ่มผู้ดูแล"]:
         user_id = event.source.user_id
         res_msg = register_caregiver(group_id, user_id, sender_name)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=res_msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=res_msg, quick_reply=get_main_quick_reply()))
         return
 
-    # คำสั่งขอดูลิงก์ประวัติย้อนหลังใน Google Sheets
     if raw_text in ["ดูประวัติ", "ขอลิงก์", "ดูตาราง", "ดูแผ่นงาน"]:
         if event.source.type == 'group':
             msg = (
@@ -564,18 +581,17 @@ def handle_text(event):
                 f"🔗 {SPREADSHEET_URL}\n\n"
                 f"💡 *คำแนะนำ:* ให้เลือกดู Tab ด้านล่างชื่อ ***ส่วนตัว*** ค่ะ"
             )
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg, quick_reply=get_main_quick_reply()))
         return
 
-    # คำสั่งสรุปผลรายสัปดาห์ / รายเดือน
     if raw_text in ["สรุปผล", "สรุปรายสัปดาห์", "รายงานความดัน"]:
         summary_msg = get_health_summary(sender_name, group_id=group_id, days=7)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=summary_msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=summary_msg, quick_reply=get_main_quick_reply()))
         return
 
     if raw_text in ["สรุปรายเดือน", "สรุปประจำเดือน"]:
         summary_msg = get_health_summary(sender_name, group_id=group_id, days=30)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=summary_msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=summary_msg, quick_reply=get_main_quick_reply()))
         return
 
     if raw_text in ["กรอกค่าสุขภาพ", "กรอกข้อมูล", "เมนูกรอกข้อมูล"]:
@@ -583,7 +599,8 @@ def handle_text(event):
             reply_token,
             FlexSendMessage(
                 alt_text="กรุณากรอกข้อมูลความดัน/น้ำตาล/ไขมัน",
-                contents=get_bp_fallback_flex()
+                contents=get_bp_fallback_flex(),
+                quick_reply=get_main_quick_reply()
             )
         )
         return
@@ -594,7 +611,7 @@ def handle_text(event):
             f"📌 ตัวบน/ตัวล่าง\n"
             f"💡 ตัวอย่าง: 125/82 หรือ ความดัน 125/82"
         )
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg, quick_reply=get_main_quick_reply()))
         return
 
     if raw_text in ["กรอกน้ำตาล", "พิมพ์น้ำตาล"]:
@@ -604,7 +621,7 @@ def handle_text(event):
             f"2️⃣ น้ำตาลสะสม (HbA1c)\n 📌 ตัวอย่าง: HbA1c 6.2 หรือ น้ำตาลสะสม 6.2\n\n"
             f"3️⃣ น้ำตาลสุ่ม/หลังอาหาร 2 ชม. (Postprandial/Random)\n 📌 ตัวอย่าง: สุ่ม 150 หรือ หลังอาหาร 150"
         )
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg, quick_reply=get_main_quick_reply()))
         return
 
     if raw_text in ["กรอกไขมัน", "พิมพ์ไขมัน"]:
@@ -614,46 +631,36 @@ def handle_text(event):
             f"2️⃣ ไขมันเลว (LDL)\n 📌 ตัวอย่าง: LDL 135\n\n"
             f"3️⃣ ไตรกลีเซอไรด์ (Triglyceride)\n 📌 ตัวอย่าง: Triglyceride 180 หรือไตรกลีเซอไรด์ 180"
         )
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg, quick_reply=get_main_quick_reply()))
         return
 
-    # ----------------------------------------------------
-    # การตอบกลับระบุชื่อผู้ส่งรายบุคคล + บันทึกลง Google Sheet
-    # ----------------------------------------------------
     # 1. ความดันโลหิต
     bp_match = re.search(r'(\d{2,3})\s*/\s*(\d{2,3})', raw_text)
     if bp_match:
         sys_val = int(bp_match.group(1))
         dia_val = int(bp_match.group(2))
         res = analyze_bp(sys_val, dia_val, sender_name=sender_name)
+        save_to_google_sheet(sender_name, "ความดัน", f"{sys_val}/{dia_val}", f"SYS:{sys_val}, DIA:{dia_val}", group_id)
         
-        save_to_google_sheet(
-            sender=sender_name, 
-            data_type="ความดัน", 
-            value=f"{sys_val}/{dia_val}", 
-            result_summary=f"SYS:{sys_val}, DIA:{dia_val}",
-            group_id=group_id
-        )
-        
-        # ตรวจสอบหากค่าความดันสูงระดับวิกฤต (SYS >= 160 หรือ DIA >= 100) ส่งแท็กผู้ดูแล + การ์ด Triage
         if sys_val >= 160 or dia_val >= 100:
             alert_msg = create_caregiver_mention_msg(group_id, sender_name, sys_val, dia_val)
             triage_flex = FlexSendMessage(
                 alt_text="🚨 ประเมินสัญญาณอันตราย (Red Flag Triage)",
-                contents=get_red_flag_triage_flex(sender_name=sender_name, sys_val=sys_val, dia_val=dia_val)
+                contents=get_red_flag_triage_flex(sender_name=sender_name, sys_val=sys_val, dia_val=dia_val),
+                quick_reply=get_main_quick_reply()
             )
             line_bot_api.reply_message(
                 reply_token,
                 [
                     TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}"),
-                    alert_msg if isinstance(alert_msg, TextSendMessage) else TextSendMessage(text="🚨 **แจ้งเตือนความดันสูงระดับวิกฤต!**"),
+                    alert_msg if isinstance(alert_msg, TextSendMessage) else TextSendMessage(text="🚨 **แจ้งเตือนความดันสูงระดับวิกฤต!**", quick_reply=get_main_quick_reply()),
                     triage_flex
                 ]
             )
         else:
             line_bot_api.reply_message(
                 reply_token,
-                TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
+                TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply())
             )
         return
 
@@ -663,17 +670,8 @@ def handle_text(event):
         if match:
             val = float(match.group(1))
             res = analyze_hbalc(val, sender_name=sender_name)
-            save_to_google_sheet(
-                sender=sender_name,
-                data_type="น้ำตาล HbA1c",
-                value=f"{val}%",
-                result_summary=f"HbA1c:{val}",
-                group_id=group_id
-            )
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=f"บันทึกค่าน้ำตาลสะสมของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
-            )
+            save_to_google_sheet(sender_name, "น้ำตาล HbA1c", f"{val}%", f"HbA1c:{val}", group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"บันทึกค่าน้ำตาลสะสมของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply()))
             return
 
     # 3. ค่าน้ำตาล FPG
@@ -682,36 +680,18 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_fpg(val, sender_name=sender_name)
-            save_to_google_sheet(
-                sender=sender_name,
-                data_type="น้ำตาล FPG",
-                value=f"{val} mg/dL",
-                result_summary=f"FPG:{val}",
-                group_id=group_id
-            )
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
-            )
+            save_to_google_sheet(sender_name, "น้ำตาล FPG", f"{val} mg/dL", f"FPG:{val}", group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply()))
             return
 
-    # 4. ค่าน้ำตาลสุ่ม/หลังอาหาร
+    # 4. ค่าน้ำตาลสุ่ม
     if 'สุ่ม' in raw_text or 'หลังอาหาร' in raw_text or 'random' in raw_text.lower():
         match = re.search(r'(\d+)', raw_text)
         if match:
             val = int(match.group(1))
             res = analyze_random_sugar(val, sender_name=sender_name)
-            save_to_google_sheet(
-                sender=sender_name,
-                data_type="น้ำตาลสุ่ม",
-                value=f"{val} mg/dL",
-                result_summary=f"Random:{val}",
-                group_id=group_id
-            )
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
-            )
+            save_to_google_sheet(sender_name, "น้ำตาลสุ่ม", f"{val} mg/dL", f"Random:{val}", group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"บันทึกค่าน้ำตาลของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply()))
             return
 
     # 5. ค่า HDL
@@ -721,17 +701,8 @@ def handle_text(event):
             val = int(match.group(1))
             gender = "หญิง" if "หญิง" in raw_text else "ชาย"
             res = analyze_hdl(val, gender, sender_name=sender_name)
-            save_to_google_sheet(
-                sender=sender_name,
-                data_type="ไขมัน HDL",
-                value=f"{val} mg/dL ({gender})",
-                result_summary=f"HDL:{val}",
-                group_id=group_id
-            )
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=f"บันทึกค่าไขมัน HDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
-            )
+            save_to_google_sheet(sender_name, "ไขมัน HDL", f"{val} mg/dL ({gender})", f"HDL:{val}", group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"บันทึกค่าไขมัน HDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply()))
             return
 
     # 6. ค่า LDL
@@ -740,17 +711,8 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_ldl(val, sender_name=sender_name)
-            save_to_google_sheet(
-                sender=sender_name,
-                data_type="ไขมัน LDL",
-                value=f"{val} mg/dL",
-                result_summary=f"LDL:{val}",
-                group_id=group_id
-            )
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=f"บันทึกค่าไขมัน LDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
-            )
+            save_to_google_sheet(sender_name, "ไขมัน LDL", f"{val} mg/dL", f"LDL:{val}", group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"บันทึกค่าไขมัน LDL ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply()))
             return
 
     # 7. ค่า Triglyceride
@@ -759,20 +721,10 @@ def handle_text(event):
         if match:
             val = int(match.group(1))
             res = analyze_triglyceride(val, sender_name=sender_name)
-            save_to_google_sheet(
-                sender=sender_name,
-                data_type="ไตรกลีเซอไรด์",
-                value=f"{val} mg/dL",
-                result_summary=f"Triglyceride:{val}",
-                group_id=group_id
-            )
-            line_bot_api.reply_message(
-                reply_token,
-                TextSendMessage(text=f"บันทึกค่าไตรกลีเซอไรด์ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}")
-            )
+            save_to_google_sheet(sender_name, "ไตรกลีเซอไรด์", f"{val} mg/dL", f"Triglyceride:{val}", group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"บันทึกค่าไตรกลีเซอไรด์ของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}", quick_reply=get_main_quick_reply()))
             return
 
-# ปิดการตอบกลับรูปภาพทั่วไป เพื่อไม่ให้รบกวนแชตกลุ่มเวลาส่งรูปอื่นๆ
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
     pass
