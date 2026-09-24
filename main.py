@@ -23,7 +23,7 @@ LINE_CHANNEL_SECRET = os.environ.get(
     "490d4f5e36a60913923f3bd1c8768a15"
 ).strip()
 
-GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwYCjs74ZKt0nUrkhiJHdRlvPUjtfA9zOn9FqF934ZQTV511DYG5Y2djtgN68xsQqmY/exec"
+GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbxGemyVn5GbNABpmK5d0W5pIj6lwzECXNvJcAZT-of3-tKThFN5DYWsTjX6sUZs-rWc/exec"
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnfsesvCMsdA7KxvRbKSUpyls/edit?usp=sharing"
 
 # =================================================================
