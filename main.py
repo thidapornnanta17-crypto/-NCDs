@@ -23,7 +23,7 @@ LINE_CHANNEL_SECRET = os.environ.get(
 ).strip()
 
 # 📌 วาง Web App URL จาก Google Apps Script (สำหรับบันทึกข้อมูล)
-GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwQOToSsiM85k_PIcBoRwUUuZa7_U8y_7b2UKkgzABkXiYuNMI8tSAHg-K7d10pvQVO/exec"
+GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbzZh9-Z_BMPEUtIX1mVxlh1-RshU6RhrCLZzUsLskwQuDUJl1m34NwTJtZJ-QmjJp57/exec"
 
 # 📌 ลิงก์ Google Sheets สำหรับผู้ใช้กดดู (สิทธิ์ Viewer)
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnfsesvCMsdA7KxvRbKSUpyls/edit?usp=sharing"
