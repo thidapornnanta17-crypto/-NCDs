@@ -25,7 +25,7 @@ LINE_CHANNEL_SECRET = os.environ.get(
 
 GOOGLE_SHEET_URL = os.environ.get(
     "GOOGLE_SHEET_URL",
-    "https://script.google.com/macros/s/AKfycbyTt8ynjXk_EuQmp4JbuXd5oAm9ZbQqYPmnwoCFH_nrXciO2s9VZho0H3pLJzviM_V6/exec"
+    "https://script.google.com/macros/s/AKfycbw_k2ZWumQ40reatq56ZichDbR8JZKCo-6vTu9mk55TZJzN82fvT7ffpeq6RoRXO32U/exec"
 ).strip()
 
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnfsesvCMsdA7KxvRbKSUpyls/edit?usp=sharing"
