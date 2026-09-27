@@ -23,16 +23,18 @@ LINE_CHANNEL_SECRET = os.environ.get(
     "490d4f5e36a60913923f3bd1c8768a15"
 ).strip()
 
-GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbxGemyVn5GbNABpmK5d0W5pIj6lwzECXNvJcAZT-of3-tKThFN5DYWsTjX6sUZs-rWc/exec"
+GOOGLE_SHEET_URL = os.environ.get(
+    "GOOGLE_SHEET_URL",
+    "https://script.google.com/macros/s/AKfycbwYCjs74ZKt0nUrkhiJHdRlvPUjtfA9zOn9FqF934ZQTV511DYG5Y2djtgN68xsQqmY/exec"
+).strip()
+
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vzpH2mzX-mg4mD0vikQnfsesvCMsdA7KxvRbKSUpyls/edit?usp=sharing"
 
-# =================================================================
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# ==================== QUICK REPLY MENU (ปุ่มเมนูลอยสำหรับกลุ่ม) ====================
+# ==================== QUICK REPLY MENU ====================
 def get_main_quick_reply():
-    """ชุดปุ่มกดด่วนทางลัด สำหรับใช้งานในกลุ่มแทน Rich Menu"""
     return QuickReply(
         items=[
             QuickReplyButton(action=MessageAction(label="📊 ดูสรุปผล", text="สรุปผล")),
@@ -42,64 +44,55 @@ def get_main_quick_reply():
         ]
     )
 
-# ==================== CAREGIVER SYSTEM ====================
-CAREGIVERS = {}
-
-def register_caregiver(group_id, user_id, display_name):
-    if group_id not in CAREGIVERS:
-        CAREGIVERS[group_id] = []
-    for c in CAREGIVERS[group_id]:
-        if c['user_id'] == user_id:
+# ==================== PERSISTENT CAREGIVER SYSTEM (GOOGLE SHEETS) ====================
+def register_caregiver_sheet(group_id, user_id, display_name):
+    try:
+        payload = {
+            "action": "register_caregiver",
+            "groupId": group_id,
+            "userId": user_id,
+            "sender": display_name
+        }
+        res = requests.post(GOOGLE_SHEET_URL, json=payload, timeout=8).json()
+        if res.get("status") == "registered":
+            return f"บันทึก คุณ {display_name} เป็นผู้ดูแลประจำกลุ่มนี้เรียบร้อยแล้วค่ะ (บันทึกถาวร)"
+        elif res.get("status") == "exists":
             return f"คุณ {display_name} เป็นผู้ดูแลของกลุ่มนี้อยู่แล้วค่ะ"
-    CAREGIVERS[group_id].append({
-        "user_id": user_id,
-        "name": display_name
-    })
-    return f"บันทึก คุณ {display_name} เป็นผู้ดูแลประจำกลุ่มนี้เรียบร้อยแล้วค่ะ"
+    except Exception as e:
+        print(f"Error registering caregiver: {e}")
+    return f"บันทึก คุณ {display_name} เป็นผู้ดูแลเรียบร้อยแล้วค่ะ"
+
+def get_caregivers_from_sheet(group_id):
+    try:
+        url = f"{GOOGLE_SHEET_URL}?action=get_caregivers&groupId={group_id}"
+        res = requests.get(url, timeout=8).json()
+        if res.get("status") == "success":
+            return res.get("caregivers", [])
+    except Exception as e:
+        print(f"Error fetching caregivers: {e}")
+    return []
 
 def create_caregiver_mention_msg(group_id, patient_name, sys_val, dia_val):
-    caregivers = CAREGIVERS.get(group_id, [])
+    caregivers = get_caregivers_from_sheet(group_id)
     if not caregivers:
         return TextSendMessage(
             text=f"🚨 **แจ้งเตือนสุขภาพวิกฤต!**\n"
                  f"ความดันของ คุณ{patient_name} สูงผิดปกติอยู่ในระดับอันตราย ({sys_val}/{dia_val} mmHg) ค่ะ\n\n"
                  f"⚠️ ขอให้ลูกหลานในบ้านช่วยเช็กว่าลืมทานยาความดันมื้อล่าสุด หรือทานอาหารเค็มไปหรือไม่\n"
-                 f"💡 *คำแนะนำ:* สมาชิกที่เป็นผู้ดูแลสามารถพิมพ์ 'ฉันเป็นผู้ดูแล' เพื่อให้บอตแท็กแจ้งเตือนชื่อโดยตรงได้นะคะ",
+                 f"💡 *คำแนะนำ:* สมาชิกที่เป็นผู้ดูแลสามารถพิมพ์ 'ฉันเป็นผู้ดูแล' เพื่อลงทะเบียนแจ้งเตือนถาวรได้นะคะ",
             quick_reply=get_main_quick_reply()
         )
     
-    mention_header = "🚨 **แจ้งเตือนผู้ดูแลประจำบ้าน!**\n"
-    tag_list_text = ""
-    substitution_dict = {}
-    
-    for idx, c in enumerate(caregivers):
-        key_name = f"user{idx}"
-        tag_list_text += f"{{{key_name}}}"
-        substitution_dict[key_name] = {
-            "type": "mention",
-            "mentionee": {
-                "type": "user",
-                "userId": c['user_id']
-            }
-        }
-        
-    body_text = (
-        f"\n\nความดันของ คุณ{patient_name} สูงอยู่ในระดับอันตราย! ({sys_val}/{dia_val} mmHg)\n"
-        f"ขอความกรุณาช่วยตรวจสอบ:\n"
+    mentions_text = " ".join([f"@{c['name']}" for c in caregivers])
+    alert_text = (
+        f"🚨 **แจ้งเตือนผู้ดูแลประจำบ้าน!**\n"
+        f"เรียนผู้ดูแล {mentions_text}\n\n"
+        f"ความดันของ **คุณ{patient_name}** สูงอยู่ในระดับอันตราย! (**{sys_val}/{dia_val} mmHg**)\n\n"
+        f"ขอความกรุณาผู้ดูแลช่วยตรวจสอบทันที:\n"
         f"1. ทานยาลดความดันตรงเวลาหรือไม่?\n"
         f"2. มีอาการปวดศีรษะ ท้ายทอย หรือแน่นหน้าอกหรือไม่?"
     )
-    
-    full_text = mention_header + tag_list_text + body_text
-    return {
-        "type": "textV2",
-        "text": full_text,
-        "substitution": substitution_dict,
-        "quickReply": get_main_quick_reply().as_json_dict()
-    } if hasattr(TextSendMessage, 'payload') else TextSendMessage(
-        text=f"🚨 **แจ้งเตือนผู้ดูแล!** ความดัน คุณ{patient_name} สูงผิดปกติ ({sys_val}/{dia_val} mmHg)",
-        quick_reply=get_main_quick_reply()
-    )
+    return TextSendMessage(text=alert_text, quick_reply=get_main_quick_reply())
 
 # ==================== RED FLAG TRIAGE FLEX MESSAGE ====================
 def get_red_flag_triage_flex(sender_name="สมาชิก", sys_val=160, dia_val=100):
@@ -183,14 +176,15 @@ def save_to_google_sheet(sender, data_type, value, result_summary, group_id="ส
             "result": result_summary,
             "groupId": group_id
         }
-        requests.post(GOOGLE_SHEET_URL, json=payload, timeout=5)
+        res = requests.post(GOOGLE_SHEET_URL, json=payload, timeout=8)
+        print(f"บันทึก Google Sheet เรียบร้อย: {res.text}")
     except Exception as e:
         print(f"❌ บันทึก Google Sheet ไม่สำเร็จ: {e}")
 
 def get_health_summary(sender, group_id="ส่วนตัว", days=7):
     try:
         url = f"{GOOGLE_SHEET_URL}?action=summary&sender={sender}&groupId={group_id}&days={days}"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=8)
         res_data = response.json()
         
         if res_data.get("status") == "empty":
@@ -220,7 +214,7 @@ def get_health_summary(sender, group_id="ส่วนตัว", days=7):
     except Exception as e:
         return "❌ ไม่สามารถดึงข้อมูลสรุปผลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
 
-# ==================== LOGIC MEDICAL ANALYZERS (ข้อความวิเคราะห์ฉบับเต็ม) ====================
+# ==================== LOGIC MEDICAL ANALYZERS ====================
 def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
     if sys_val < 90:
         sys_res = (
@@ -311,6 +305,7 @@ def analyze_bp(sys_val, dia_val, sender_name="สมาชิก"):
             "• กิจกรรมและการใช้ชีวิต: หยุดพักทุกกิจกรรมทันที นั่งพิงในท่าสบายๆ หายใจเข้า-ออกยาวๆ ช้าๆ ห้ามเดินทางไปโรงพยาบาลโดยการขับรถเอง\n"
             "• การสังเกตอาการวิกฤต (โทร 1669 หรือไปห้องฉุกเฉินทันที): ปวดศีรษะรุนแรงเฉียบพลัน / สับสน แขนขาอ่อนแรงครึ่งซีก หน้าเบี้ยว ปากเบี้ยว พูดไม่ชัด, เจ็บแน่นหน้าอกรุนแรง หายใจหอบเหนื่อยเหมือนจะขาดใจ, มองเห็นภาพซ้อน หรือตาดับมืดไปทันที"
         )
+
     return f"🩺 ผลการวิเคราะห์ความดันโลหิตของ คุณ{sender_name}\n\n1️⃣ {sys_res}\n\n2️⃣ {dia_res}"
 
 TEXT_SUGAR_EMERGENCY = (
@@ -561,7 +556,7 @@ def handle_text(event):
 
     if raw_text in ["ฉันเป็นผู้ดูแล", "ลงทะเบียนผู้ดูแล", "เพิ่มผู้ดูแล"]:
         user_id = event.source.user_id
-        res_msg = register_caregiver(group_id, user_id, sender_name)
+        res_msg = register_caregiver_sheet(group_id, user_id, sender_name)
         line_bot_api.reply_message(reply_token, TextSendMessage(text=res_msg, quick_reply=get_main_quick_reply()))
         return
 
@@ -653,7 +648,7 @@ def handle_text(event):
                 reply_token,
                 [
                     TextSendMessage(text=f"บันทึกค่าความดันของ คุณ{sender_name} เรียบร้อยแล้วค่ะ\n\n{res}"),
-                    alert_msg if isinstance(alert_msg, TextSendMessage) else TextSendMessage(text="🚨 **แจ้งเตือนความดันสูงระดับวิกฤต!**", quick_reply=get_main_quick_reply()),
+                    alert_msg,
                     triage_flex
                 ]
             )
